@@ -1,9 +1,10 @@
-from dataclasses import asdict, dataclass
-from enum import StrEnum
+from argparse import ArgumentParser, Namespace
+from dataclasses import asdict, dataclass, fields
+from enum import Enum, StrEnum
 import json
 import logging
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterable, Iterator, Optional
 
 import torch
 from torch import nn
@@ -36,6 +37,30 @@ class Hyperparameters:
     learning_rate: float = 1e-4
     optimizer: Optimizer = Optimizer.ADADELTA
     seed: int = 0
+    validation_split: float = 0.2
+
+    @classmethod
+    def to_args(cls, parser: ArgumentParser):
+        for field in fields(cls):
+            if field.name == "optimizer":
+                parser.add_argument(
+                    f"--{field.name}",
+                    default=field.default,
+                    choices=[o.value for o in field.type],  # pyright: ignore[reportGeneralTypeIssues]
+                )
+            else:
+                parser.add_argument(
+                    f"--{field.name}", type=field.type, default=field.default
+                )
+
+    @classmethod
+    def from_args(cls, parsed: Namespace):
+        data = {
+            f.name: getattr(parsed, f.name)
+            for f in fields(cls)
+            if hasattr(parsed, f.name)
+        }
+        return cls(**data)
 
 
 MODEL_SAVE_FILE = "model.pth"

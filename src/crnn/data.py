@@ -63,8 +63,8 @@ def load_mnist(
     batch_size: int,
     split: DataSplit,
     seed: int,
+    val_split: float,
     path: str = "data/mnist",
-    val_split: float = 0.2,
 ) -> DataLoader:
     is_test = split == DataSplit.TEST
     dataset = datasets.MNIST(
@@ -140,7 +140,7 @@ def load_labelfile_dataset(
     batch_size: int,
     split: DataSplit,
     seed: int,
-    val_split: float = 0.2,
+    val_split: float,
 ):
     is_test = split == DataSplit.TEST
 

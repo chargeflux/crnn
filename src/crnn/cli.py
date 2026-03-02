@@ -31,26 +31,30 @@ class Config:
     command: str
     device: str
     vocabulary: Optional[str]
+    logging_level: str
 
 
 @dataclass
 class TrainConfig(Config):
     dataset: Dataset
-    input_dir: Path
+    input_dir: Optional[Path]
     output_dir: Path
+    hp: train.Hyperparameters
 
     @classmethod
     def from_args(cls, parsed_args: Namespace) -> "TrainConfig":
         return cls(
             command=parsed_args.command,
             device=parsed_args.device,
+            vocabulary=parsed_args.vocabulary,
+            logging_level=parsed_args.logging_level,
             dataset=parsed_args.dataset,
             input_dir=parsed_args.input_dir,
             output_dir=parsed_args.output_dir
             or Path(
                 f"experiments/{parsed_args.dataset.lower()}/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             ),
-            vocabulary=parsed_args.vocabulary,
+            hp=train.Hyperparameters.from_args(parsed_args),
         )
 
 
@@ -64,9 +68,10 @@ class InferConfig(Config):
         return cls(
             command=parsed_args.command,
             device=parsed_args.device,
+            vocabulary=parsed_args.vocabulary,
+            logging_level=parsed_args.logging_level,
             model_path=Path(parsed_args.model_path),
             file=Path(parsed_args.file),
-            vocabulary=parsed_args.vocabulary,
         )
 
 
@@ -82,6 +87,13 @@ def parse_args(args) -> TrainConfig | InferConfig:
         "--vocabulary",
         type=str,
         help="specify string representing the character set for decoding with a blank token character at the beginning",
+    )
+    root_parser.add_argument(
+        "--logging-level",
+        default="INFO",
+        choices=["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"],
+        type=str,
+        help="set logging level",
     )
 
     parser = ArgumentParser("crnn", description="Train and infer from a CRNN model")
@@ -109,6 +121,7 @@ def parse_args(args) -> TrainConfig | InferConfig:
         type=Path,
         help="directory to store the model and config. Defaults to experiments/<dataset>/Ymd_HMS",
     )
+    train.Hyperparameters.to_args(train_parser)
 
     infer_parser = subparsers.add_parser(
         "infer",
@@ -134,9 +147,8 @@ def parse_args(args) -> TrainConfig | InferConfig:
 
 
 def main():
-    configure_logging()
-
     config = parse_args(sys.argv[1:])
+    configure_logging(config.logging_level)
     logging.debug(f"Parsed args: {config}")
 
     vocab = config.vocabulary
@@ -145,13 +157,23 @@ def main():
     device = config.device
 
     if isinstance(config, TrainConfig):
-        hparams = train.Hyperparameters()
+        hparams = config.hp
         logging.info(f"Hyperparameters: {hparams}")
 
         if config.dataset == Dataset.MNIST:
             logging.info("Loading MNIST dataset")
-            train_loader = load_mnist(hparams.batch_size, DataSplit.TRAIN, hparams.seed)
-            val_loader = load_mnist(hparams.batch_size, DataSplit.TRAIN, hparams.seed)
+            train_loader = load_mnist(
+                hparams.batch_size,
+                DataSplit.TRAIN,
+                hparams.seed,
+                hparams.validation_split,
+            )
+            val_loader = load_mnist(
+                hparams.batch_size,
+                DataSplit.TRAIN,
+                hparams.seed,
+                hparams.validation_split,
+            )
             if vocab is None:
                 vocab = config.dataset.get_vocabulary()
                 logging.info(f"Defaulting vocabulary to digits: {vocab}")
@@ -171,6 +193,7 @@ def main():
                 hparams.batch_size,
                 DataSplit.TRAIN,
                 hparams.seed,
+                hparams.validation_split,
             )
             val_loader = load_labelfile_dataset(
                 config.input_dir / "train",
@@ -178,6 +201,7 @@ def main():
                 hparams.batch_size,
                 DataSplit.VALIDATION,
                 hparams.seed,
+                hparams.validation_split,
             )
         else:
             raise ValueError(f"Unsupported dataset: {config.dataset.value}")
