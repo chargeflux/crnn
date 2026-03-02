@@ -3,14 +3,13 @@ from enum import StrEnum
 import json
 import logging
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
 from crnn.decoder import greedy
-from crnn.data import Vocabulary
 from crnn.net import CRNN
 
 logger = logging.getLogger(__name__)
@@ -39,20 +38,52 @@ class Hyperparameters:
     seed: int = 0
 
 
-def save_model(hparams: Hyperparameters, model: nn.Module, output_dir: Path):
+MODEL_SAVE_FILE = "model.pth"
+MODEL_CONFIG_SAVE_FILE = "model.json"
+VOCABULARY_SAVE_FILE = "vocab.txt"
+
+
+def save_model(
+    hparams: Hyperparameters, model: nn.Module, output_dir: Path, vocab: str
+):
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_save_path = output_dir / "model.pth"
-    hparams_save_path = output_dir / "model.json"
+    model_save_path = output_dir / MODEL_SAVE_FILE
+    hparams_save_path = output_dir / MODEL_CONFIG_SAVE_FILE
+    vocab_save_path = output_dir / VOCABULARY_SAVE_FILE
+
     torch.save(model.state_dict(), model_save_path)
     logger.info(f"Saved model: {model_save_path}")
     with open(hparams_save_path, "w") as f:
         json.dump(asdict(hparams), f, indent=4)
     logging.info(f"Saved model config: {hparams_save_path}")
+    with open(vocab_save_path, "w") as f:
+        f.write(vocab)
+    logging.info(f"Saved vocabulary: {vocab_save_path}")
+
+
+def load_model(model_path: Path, device: str, vocab: Optional[str]):
+    if not model_path.is_file():
+        raise ValueError("Specify path to model file")
+
+    if vocab is None:
+        vocab_file = model_path.parent / VOCABULARY_SAVE_FILE
+        if vocab_file.exists():
+            vocab = vocab_file.read_text().strip()
+        else:
+            raise ValueError(
+                f"Provide a {VOCABULARY_SAVE_FILE} in the model directory {model_path} containing a string representing the character set for decoding with a blank token character at the beginning"
+            )
+    model = CRNN(len(vocab))
+    model.load_state_dict(
+        torch.load(model_path, weights_only=True, map_location=device)
+    )
+    model.to(device)
+    return model, vocab
 
 
 def train(
     hparams: Hyperparameters,
-    vocab: Vocabulary,
+    vocab: str,
     device: str,
     train_loader: DataLoader,
     valid_loader: DataLoader,
@@ -131,4 +162,4 @@ def train(
             f"Epoch: {epoch + 1:03d}/{hparams.epochs:03d} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}"
         )
 
-    save_model(hparams, model, output_dir)
+    save_model(hparams, model, output_dir, vocab)

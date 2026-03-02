@@ -5,17 +5,18 @@ from enum import StrEnum
 import logging
 from pathlib import Path
 import sys
+from typing import Optional
 
 import torch
 
 from crnn import infer, train
-from crnn.data import DataSplit, Vocabulary, load_mnist
+from crnn.data import DataSplit, Vocabulary, load_labelfile_dataset, load_mnist
 from crnn.log import configure_logging
-from crnn.net import CRNN
 
 
 class Dataset(StrEnum):
     MNIST = "MNIST"
+    LABEL_FILE = "LABEL_FILE"
 
     def get_vocabulary(self) -> Vocabulary:
         match self:
@@ -29,12 +30,13 @@ class Dataset(StrEnum):
 class Config:
     command: str
     device: str
-    vocabulary: str
+    vocabulary: Optional[str]
 
 
 @dataclass
 class TrainConfig(Config):
     dataset: Dataset
+    input_dir: Path
     output_dir: Path
 
     @classmethod
@@ -42,12 +44,13 @@ class TrainConfig(Config):
         return cls(
             command=parsed_args.command,
             device=parsed_args.device,
-            vocabulary=parsed_args.vocabulary,
             dataset=parsed_args.dataset,
+            input_dir=parsed_args.input_dir,
             output_dir=parsed_args.output_dir
             or Path(
-                f"experiments/{parsed_args.dataset}/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                f"experiments/{parsed_args.dataset.lower()}/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             ),
+            vocabulary=parsed_args.vocabulary,
         )
 
 
@@ -61,9 +64,9 @@ class InferConfig(Config):
         return cls(
             command=parsed_args.command,
             device=parsed_args.device,
-            vocabulary=parsed_args.vocabulary,
             model_path=Path(parsed_args.model_path),
             file=Path(parsed_args.file),
+            vocabulary=parsed_args.vocabulary,
         )
 
 
@@ -78,8 +81,7 @@ def parse_args(args) -> TrainConfig | InferConfig:
     root_parser.add_argument(
         "--vocabulary",
         type=str,
-        help="specify string representing character set for decoding with a blank token character at the beginning",
-        default=Vocabulary.DIGITS,
+        help="specify string representing the character set for decoding with a blank token character at the beginning",
     )
 
     parser = ArgumentParser("crnn", description="Train and infer from a CRNN model")
@@ -94,6 +96,12 @@ def parse_args(args) -> TrainConfig | InferConfig:
         default=Dataset.MNIST,
         choices=[d.value for d in Dataset],
         help=f"datasets: {[d.value for d in Dataset]}",
+    )
+    train_parser.add_argument(
+        "-i",
+        "--input-dir",
+        type=Path,
+        help="directory containing 'train' and 'test' folders. Required for LABEL_FILE dataset where each image has a corresponding text file containing the label",
     )
     train_parser.add_argument(
         "-o",
@@ -132,37 +140,65 @@ def main():
     logging.debug(f"Parsed args: {config}")
 
     vocab = config.vocabulary
-    logging.info(f"Using vocabulary: {vocab}")
+    if vocab is not None:
+        logging.info(f"Using vocabulary: {vocab}")
     device = config.device
 
     if isinstance(config, TrainConfig):
-        hparams = train.Hyperparameters(epochs=3)
+        hparams = train.Hyperparameters()
         logging.info(f"Hyperparameters: {hparams}")
 
         if config.dataset == Dataset.MNIST:
             logging.info("Loading MNIST dataset")
             train_loader = load_mnist(hparams.batch_size, DataSplit.TRAIN, hparams.seed)
             val_loader = load_mnist(hparams.batch_size, DataSplit.TRAIN, hparams.seed)
+            if vocab is None:
+                vocab = config.dataset.get_vocabulary()
+                logging.info(f"Defaulting vocabulary to digits: {vocab}")
+        elif config.dataset == Dataset.LABEL_FILE:
+            logging.info("Loading label file dataset")
+            if vocab is None:
+                raise ValueError("Vocabulary must be specified for label file dataset")
+            if config.input_dir is None or not config.input_dir.exists():
+                raise ValueError(
+                    f"Invalid dataset path: {config.input_dir}. Specify path to directory with 'train' and 'test' subdirectories for {config.dataset} dataset"
+                )
+
+            char_to_idx = {char: i for i, char in enumerate(vocab)}
+            train_loader = load_labelfile_dataset(
+                config.input_dir / "train",
+                char_to_idx,
+                hparams.batch_size,
+                DataSplit.TRAIN,
+                hparams.seed,
+            )
+            val_loader = load_labelfile_dataset(
+                config.input_dir / "train",
+                char_to_idx,
+                hparams.batch_size,
+                DataSplit.VALIDATION,
+                hparams.seed,
+            )
         else:
             raise ValueError(f"Unsupported dataset: {config.dataset.value}")
 
         logging.info(f"Output directory: {config.output_dir}")
         train.train(
             hparams,
-            Vocabulary(vocab),
+            vocab,
             device,
             train_loader,
             val_loader,
             config.output_dir,
         )
     elif isinstance(config, InferConfig):
-        model = CRNN(len(vocab))
-        model.load_state_dict(
-            torch.load(config.model_path, weights_only=True, map_location=device)
+        logging.info(
+            f"Running inference on {config.file} with model {config.model_path}"
         )
-        model.to(device)
+        model, vocab = train.load_model(config.model_path, device, vocab)
 
-        print(infer.predict(config.file, device, vocab, model))
+        result = infer.predict(config.file, device, vocab, model)
+        print(result)
 
 
 if __name__ == "__main__":

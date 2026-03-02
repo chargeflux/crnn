@@ -136,7 +136,7 @@ class LabelFileDataset(Dataset):
 
 def load_labelfile_dataset(
     path: Path,
-    vocab: Vocabulary,
+    char_to_idx: Dict[str, int],
     batch_size: int,
     split: DataSplit,
     seed: int,
@@ -146,14 +146,14 @@ def load_labelfile_dataset(
 
     dataset = LabelFileDataset(
         path,
-        vocab.char_to_idx(),
+        char_to_idx,
         transform=get_transforms_compose(),
     )
 
     if not is_test:
         dataset = LabelFileDataset(
             path,
-            vocab.char_to_idx(),
+            char_to_idx,
             transform=get_transforms_compose(),
         )
         val_size = int(len(dataset) * val_split)
