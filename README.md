@@ -13,12 +13,12 @@ uv sync --extra <cu128|cpu>
 
 #### Train
 
-Choose between available datasets or a custom dataset. Custom datasets require a label text file for every image where a `.txt` extension replaces the image extension. The path to the custom dataset should have `train` and `test` subdirectories. 
+Choose between available datasets or a custom dataset. Custom datasets require a label text file for every image where the extension in the image filename is replaced with `.txt`. The path to the custom dataset should have `train` and `test` subdirectories. 
 
 **Vocabulary**: Provide a string representing a character set for prediction with a **blank token** character at index 0, such as "-0123456789" for digits only
 
 ```shell
-crnn train [--device cuda,cpu] --vocabulary <string> [--dataset MNIST|LABEL_FILE] [-o OUTPUT_DIR]
+crnn train [--device cuda,cpu] --vocabulary <string> [--dataset MNIST,LABEL_FILE] [-o OUTPUT_DIR]
 ```
 
 #### Infer
@@ -28,7 +28,7 @@ Run inference on an image using a trained model.
 **Vocabulary**: Provide a `vocab.txt` file in the model directory or specify using the `--vocabulary` flag
 
 ```shell
-crnn infer [--device cuda,cpu]  [--vocabulary <string>] -f <image file> -m <path to model>
+crnn infer [--device cuda,cpu] [--vocabulary <string>] -f <image file> -m <path to model>
 ```
 
 ## License
